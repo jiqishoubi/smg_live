@@ -1,16 +1,16 @@
-# 收看五星体育频道F1比赛直播<br>
-观看五星体育频道直播而不受限制
+# 收看SMG电视频道直播<br>
+可自由观看SMG电视频道直播
 
 # 安装
 需要浏览器装有 [Tampermonkey](https://tampermonkey.net/) 或 [Violentmonkey](https://violentmonkey.github.io/) 插件, 点击下方表格中安装，即可安装脚本.
 
 |正式版 (GitHub 源)                                                                           |
 |---------------------------------------------------------------------------------------------|
-| [安装](https://g.geeck.eu.org/https://raw.githubusercontent.com/Popukok/smg_live/refs/heads/main/smg_fivestar.user.js)  |
+| [安装](https://raw.githubusercontent.com/Popukok/smg_live/refs/heads/main/smg_fivestar.user.js)  |
 
 安完脚本后[点击打开看看新闻](https://live.kankanews.com/huikan?id=10)，点击对应的频道即可观看节目<br>
 <br>
-**例如收看五星体育频道F1比赛直播，可以跳过以下图片提示**
+**例如收看体育频道的比赛直播，可以跳过以下图片提示**
 
 ![这是图片](https://p.statickksmg.com/cont/2023/10/08/image_1696731269_qOxBpp34.jpg "")
 
@@ -29,5 +29,5 @@
 *   如果你**习惯使用Firefox桌面版**，或者看重**开源生态**，那么**Firefox for Android** 会很适合你。
 *   **X浏览器**则以其**轻量级、无广告**的特点，并支持油猴脚本，吸引了部分用户。
 
-
+# 脚本仅供学习交流
 
