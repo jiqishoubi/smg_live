@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name             收看SMGTV电视节目
 // @namespace        http://tampermonkey.net/
-// @version          0.15
+// @version          0.16
 // @description      收看SMGTV，并解除页面部分限制
 // @author           https://github.com/Popukok
 // @match            *://*.kankanews.com/huikan*
@@ -192,6 +192,31 @@
             document.addEventListener('DOMContentLoaded', appendStyle, { once: true });
         }
     }
+    function ensureViewportFitCover() {
+        // iOS Safari 只有在 viewport-fit=cover 时 env(safe-area-inset-*) 才会返回非 0 值
+        const apply = () => {
+            try {
+                let meta = document.querySelector('meta[name="viewport"]');
+                if (!meta) {
+                    meta = document.createElement('meta');
+                    meta.setAttribute('name', 'viewport');
+                    (document.head || document.documentElement).appendChild(meta);
+                }
+                const content = meta.getAttribute('content') || '';
+                if (/viewport-fit\s*=\s*cover/i.test(content)) {
+                    return;
+                }
+                meta.setAttribute('content', content ? content + ', viewport-fit=cover' : 'viewport-fit=cover');
+            } catch (e) {
+                throttleLog('viewport-error', 5000, () => console.warn('[SMGTV] 设置 viewport-fit 失败:', e));
+            }
+        };
+        if (document.head || document.documentElement) {
+            apply();
+        } else {
+            document.addEventListener('DOMContentLoaded', apply, { once: true });
+        }
+    }
     function getVueInstance(el) {
         return el?.__vue__ || el?.__vueParentComponent?.proxy || null;
     }
@@ -273,6 +298,10 @@
         VIDEO_RESET_EVENTS.forEach(eventName => {
             video.addEventListener(eventName, resetReady, { passive: true });
         });
+        // iOS 原生视频全屏（webkitEnterFullscreen）的进出事件：用户用系统手势/按钮
+        // 退出全屏时也要把播放器全屏按钮状态同步回来
+        video.addEventListener('webkitbeginfullscreen', () => syncFullscreenButtonState(component, true), { passive: true });
+        video.addEventListener('webkitendfullscreen', () => syncFullscreenButtonState(component, false), { passive: true });
         markReady();
     }
     function cleanupComponent(component) {
@@ -425,6 +454,23 @@
             return Promise.reject(e);
         }
     }
+    function enterNativeVideoFullscreen(component) {
+        // iPhone Safari 不支持任意元素的 Fullscreen API，只有 <video> 可以
+        // 通过 webkitEnterFullscreen() 进入 iOS 原生全屏（带系统播放器控件）
+        const video = getPlayerVideo(component);
+        if (!video || typeof video.webkitEnterFullscreen !== 'function') {
+            return false;
+        }
+        try {
+            video.webkitEnterFullscreen();
+            syncFullscreenButtonState(component, true);
+            console.log('[SMGTV] 已启用 iOS 原生视频全屏');
+            return true;
+        } catch (e) {
+            console.warn('[SMGTV] iOS 原生视频全屏失败，使用 CSS 兜底', e);
+            return false;
+        }
+    }
     function enterFullscreen(component, target) {
         const player = component?.player;
         const enterNative = callFullscreenMethod(() => (
@@ -434,7 +480,12 @@
         ));
         Promise.resolve(enterNative)
             .then(() => syncFullscreenButtonState(component, true))
-            .catch(() => enterFallbackFullscreen(target, component));
+            .catch(() => {
+                // 元素全屏不可用（iPhone Safari）：先尝试 <video> 原生全屏，再退回 CSS 模拟全屏
+                if (!enterNativeVideoFullscreen(component)) {
+                    enterFallbackFullscreen(target, component);
+                }
+            });
     }
     function exitFullscreen(component) {
         const player = component?.player;
@@ -473,8 +524,19 @@
         const component = findTVComponent();
         const target = getFullscreenTarget(component, button);
         syncLoadingState(component);
+        const video = getPlayerVideo(component);
         if (getBrowserFullscreenElement() || isFallbackFullscreen()) {
             exitFullscreen(component);
+        } else if (video && video.webkitDisplayingFullscreen) {
+            // iPhone 原生视频全屏中：退出 <video> 原生全屏
+            try {
+                if (typeof video.webkitExitFullscreen === 'function') {
+                    video.webkitExitFullscreen();
+                }
+            } catch (e) {
+                console.warn('[SMGTV] 退出 iOS 原生全屏失败', e);
+            }
+            syncFullscreenButtonState(component, false);
         } else {
             enterFullscreen(component, target);
         }
@@ -639,18 +701,26 @@
     }
     .${FULLSCREEN_TARGET_CLASS} {
         background: #000 !important;
+        bottom: 0 !important;
         box-sizing: border-box !important;
         height: 100vh !important;
+        height: 100dvh !important;
         inset: 0 !important;
+        left: 0 !important;
         margin: 0 !important;
         max-height: none !important;
         max-width: none !important;
         min-height: 100vh !important;
+        min-height: 100dvh !important;
         min-width: 100vw !important;
+        min-width: 100dvw !important;
         padding: 0 !important;
         position: fixed !important;
+        right: 0 !important;
+        top: 0 !important;
         transform: none !important;
         width: 100vw !important;
+        width: 100dvw !important;
         z-index: 2147483647 !important;
     }
     .${FULLSCREEN_TARGET_CLASS}.xgplayer,
@@ -694,6 +764,13 @@
     .${FULLSCREEN_TARGET_CLASS} .xgplayer-controls,
     .${FULLSCREEN_TARGET_CLASS} .xg-top-bar {
         z-index: 2147483647 !important;
+    }
+    /* iPhone 刘海 / Home 指示条安全区：仅在 CSS 兜底全屏下给控件留边距 */
+    .${FULLSCREEN_TARGET_CLASS} .xgplayer-controls {
+        padding-bottom: env(safe-area-inset-bottom, 0px) !important;
+    }
+    .${FULLSCREEN_TARGET_CLASS} .xg-top-bar {
+        padding-top: env(safe-area-inset-top, 0px) !important;
     }
     `);
     
@@ -833,6 +910,7 @@
     }
     // 立即开始扫描组件：不等 window.load，否则页面首个自动播放的节目会在补丁生效前
     // 用原始 initPlayer 初始化（回看节目拿不到 start/end 回放参数）。扫描循环会等到组件挂载。
+    ensureViewportFitCover();
     initComponentPatch();
     initFullscreenPatch();
 })();
