@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name             收看SMGTV电视节目
 // @namespace        http://tampermonkey.net/
-// @version          0.16
+// @version          0.17
 // @description      收看SMGTV，并解除页面部分限制
 // @author           https://github.com/Popukok
 // @match            *://*.kankanews.com/huikan*
@@ -11,8 +11,6 @@
 // @grant            none
 // @run-at           document-start
 // ==/UserScript==
-
-
 (function() {
     'use strict';
     const STYLE_ID = 'smgtv-unlock-style';
@@ -24,6 +22,10 @@
     const VIDEO_RESET_EVENTS = ['loadstart', 'waiting', 'stalled', 'emptied'];
     const watchedVideos = new WeakSet();
     const streamAddressCache = Object.create(null);
+    const channelShiftBaseCache = Object.create(null);
+    const channelLiveBaseCache = Object.create(null);
+    const SHIFT_TTL = 12 * 60 * 60 * 1000;
+    const LIVE_TTL = 3 * 60 * 60 * 1000;
     let fullscreenFallbackTarget = null;
     let cssFullscreenFallbackPlayer = null;
     let lastFullscreenActionAt = 0;
@@ -52,7 +54,6 @@
             return false;
         }
         const cached = streamAddressCache[String(channelId)] || {};
-
         const channelLiveAddress = cached.live_address || cached.shift_address;
         const channelShiftAddress = cached.shift_address || cached.live_address;
         if (channelLiveAddress && !target.live_address) {
@@ -61,7 +62,6 @@
         if (channelShiftAddress && !target.shift_address) {
             target.shift_address = channelShiftAddress;
         }
-
     }
     function getResultChannelId(result) {
         return result?.channel_id || result?.channel_info?.id || result?.id;
@@ -73,8 +73,6 @@
         program.is_shield = 0;
         program.can_review = 1;
         program.is_review = 1;
-        // 注意：不能动 isOutDate。前端 handleProgramList 用它标记"未到播出时间"的节目
-        // （now < start_time → isOutDate=1，灰掉不可点），强改为 0 会解锁未开播节目。
     }
     function forceOpenProgramList(component) {
         if (!component) {
@@ -126,29 +124,177 @@
         }
         fillStreamAddresses(channelInfo, channelId);
     }
+    function stripTimeWindow(url) {
+        return url
+            .replace(/&start=\d+&end=\d+(?=&|$)/g, '')
+            .replace(/\?start=\d+&end=\d+(?=&|$)/g, '?')
+            .replace(/\?$/, '');
+    }
     function installReplayUrlPatch(component) {
         const XGPlayer = component.$xgplayer;
         if (!XGPlayer || component.__smgReplayPatchInstalled) {
             return;
         }
         component.__smgReplayPatchInstalled = true;
-        // 接口不再返回 shift_address
         component.$xgplayer = new Proxy(XGPlayer, {
             construct(target, args) {
                 const config = args[0] || {};
                 const program = component.programObj;
-                if (config.isLive === false && config.url && typeof config.url === 'string') {
-                    const startTime = program?.start_time;
-                    const endTime = program?.end_time;
-                    if (startTime && endTime && /\.m3u8/.test(config.url) && !/\bstart=\d/.test(config.url)) {
-                        const sep = config.url.includes('?') ? '&' : '?';
-                        config.url = config.url + sep + 'start=' + startTime + '&end=' + endTime;
-                        console.log('[SMGTV] 已获取到播放地址');
+                const channelId = component.currChannel?.id != null ? component.currChannel.id :
+                    (component.programDetail?.channel_info?.id != null ? component.programDetail.channel_info.id :
+                        program?.channel_id);
+                let url = (config.url && typeof config.url === 'string') ? config.url : '';
+                const now = Date.now();
+                if (channelId != null && /\.m3u8/.test(url)) {
+                    const base = stripTimeWindow(url);
+                    if (base) {
+                        const fromShift = /[?&]start=\d+/.test(url);
+                        const store = fromShift ? channelShiftBaseCache : channelLiveBaseCache;
+                        store[channelId] = { url: base, at: now };
+                        if (fromShift && component.__smgAutoFlashTarget && !component.__smgAutoFlashScheduled) {
+                            component.__smgAutoFlashScheduled = true;
+                            const flashAnchorId = component.__smgAutoFlashAnchorId;
+                            const flashTarget = component.__smgAutoFlashTarget;
+                            component.__smgAutoFlashTarget = null;
+                            component.__smgAutoFlashAnchorId = null;
+                            setTimeout(() => {
+                                try {
+                                    const stillOnAnchor = component && component.programObj?.id === flashAnchorId;
+                                    if (stillOnAnchor && typeof component.changeProgram === 'function' && flashTarget) {
+                                        component.changeProgram(flashTarget);
+                                    }
+                                } catch (e) {
+                                    console.warn('[SMGTV] 自动捕获切回失败:', e);
+                                } finally {
+                                    if (component) {
+                                        component.__smgAutoFlashScheduled = false;
+                                    }
+                                }
+                            }, 400);
+                        }
+                    }
+                }
+                let baseOk = '';
+                if (channelId != null) {
+                    const shiftEntry = channelShiftBaseCache[channelId];
+                    if (shiftEntry && now - shiftEntry.at < SHIFT_TTL) {
+                        baseOk = shiftEntry.url;
+                    } else {
+                        const liveEntry = channelLiveBaseCache[channelId];
+                        if (liveEntry && now - liveEntry.at < LIVE_TTL) {
+                            baseOk = liveEntry.url;
+                        }
+                    }
+                }
+                const isReplay = config.isLive === false;
+                const hasStream = /\.m3u8/.test(url);
+                const hasWindow = /\bstart=\d/.test(url);
+                if (isReplay && hasWindow) {
+                    return new target(...args);
+                }
+                if (isReplay && hasStream && !hasWindow && program?.start_time && program?.end_time) {
+                    config.url = url + (url.includes('?') ? '&' : '?') +
+                        'start=' + program.start_time + '&end=' + program.end_time;
+                } else if (isReplay && !hasStream && program?.start_time && program?.end_time) {
+                    if (baseOk) {
+                        config.url = baseOk + '&start=' + program.start_time + '&end=' + program.end_time;
+                    } else {
+                        component.__smgNeedShiftBase = true;
+                    }
+                } else if (!isReplay && !hasStream) {
+                    if (baseOk) {
+                        config.url = baseOk;
+                    } else {
+                        component.__smgNeedShiftBase = true;
                     }
                 }
                 return new target(...args);
             }
         });
+    }
+    function findSportsNewsAnchor(component) {
+        const lists = [component?.currentProgramList, component?.playingProgramList, component?.slitProgramList];
+        for (const list of lists) {
+            if (!Array.isArray(list)) {
+                continue;
+            }
+            for (const p of list) {
+                if (p && typeof p.name === 'string' && p.name.indexOf('体育新闻') !== -1 &&
+                    p.isOutDate === 0 && p.play === 0 && p.id) {
+                    return p;
+                }
+            }
+        }
+        return null;
+    }
+    function getRestoreProgram(component, anchor) {
+        const cur = component?.programObj;
+        if (cur && cur.id && (!anchor || cur.id !== anchor.id)) {
+            return cur;
+        }
+        const lists = [component?.currentProgramList, component?.playingProgramList];
+        for (const list of lists) {
+            if (!Array.isArray(list)) {
+                continue;
+            }
+            const live = list.find(p => p && p.play === 1 && p.id);
+            if (live) {
+                return live;
+            }
+        }
+        return null;
+    }
+    function maybeAutoCaptureShift(component, fromMonitor) {
+        if (!component || !component.__smgPatched || !component.__smgNeedShiftBase || !fromMonitor) {
+            return;
+        }
+        const chId = component.currChannel?.id;
+        if (chId == null) {
+            return;
+        }
+        const now = Date.now();
+        const hasBase = !!(channelShiftBaseCache[chId] && now - channelShiftBaseCache[chId].at < SHIFT_TTL) ||
+            !!(channelLiveBaseCache[chId] && now - channelLiveBaseCache[chId].at < LIVE_TTL);
+        if (hasBase) {
+            component.__smgNeedShiftBase = false;
+            return;
+        }
+        if (String(chId) !== '10') {
+            component.__smgNeedShiftBase = false;
+            return;
+        }
+        const anchor = findSportsNewsAnchor(component);
+        if (!anchor) {
+            component.__smgNeedShiftBase = false;
+            return;
+        }
+        const restore = getRestoreProgram(component, anchor);
+        if (!restore || typeof component.changeProgram !== 'function') {
+            return;
+        }
+        component.__smgNeedShiftBase = false;
+        component.__smgAutoFlashAnchorId = anchor.id;
+        component.__smgAutoFlashTarget = restore;
+        try {
+            component.changeProgram(anchor);
+        } catch (e) {
+            console.warn('[SMGTV] 兜底捕获触发失败:', e);
+            component.__smgAutoFlashTarget = null;
+        }
+        setTimeout(() => {
+            const canRestore = component && component.__smgAutoFlashTarget &&
+                !component.__smgAutoFlashScheduled &&
+                component.programObj?.id === component.__smgAutoFlashAnchorId;
+            if (canRestore && typeof component.changeProgram === 'function') {
+                component.__smgAutoFlashTarget = null;
+                component.__smgAutoFlashAnchorId = null;
+                try {
+                    component.changeProgram(restore);
+                } catch (e) {
+                    console.warn('[SMGTV] 兜底捕获切回失败:', e);
+                }
+            }
+        }, 2500);
     }
     function recoverPlayerIfNeeded(component) {
         if (!component || typeof component.initPlayer !== 'function' || component.__smgRecovering) {
@@ -163,6 +309,13 @@
         const hasLive = !!(component.programDetail?.channel_info?.live_address ||
             component.currChannelDetail?.live_address);
         if (!hasLive) {
+            if (component.__smgNeedShiftBase) {
+                component.__smgRecovering = true;
+                maybeAutoCaptureShift(component, true);
+                setTimeout(() => {
+                    component.__smgRecovering = false;
+                }, 2000);
+            }
             return;
         }
         component.__smgRecoverCount = (component.__smgRecoverCount || 0) + 1;
@@ -170,7 +323,6 @@
             return;
         }
         component.__smgRecovering = true;
-        console.log('[SMGTV] 检测到无效播放地址，正在重新初始化播放器');
         component.initPlayer({ changeCurrentList: false, isPlay: true, trigger: 'click' });
         setTimeout(() => {
             component.__smgRecovering = false;
@@ -193,28 +345,28 @@
         }
     }
     function ensureViewportFitCover() {
-        // iOS Safari 只有在 viewport-fit=cover 时 env(safe-area-inset-*) 才会返回非 0 值
         const apply = () => {
             try {
-                let meta = document.querySelector('meta[name="viewport"]');
-                if (!meta) {
-                    meta = document.createElement('meta');
-                    meta.setAttribute('name', 'viewport');
-                    (document.head || document.documentElement).appendChild(meta);
-                }
-                const content = meta.getAttribute('content') || '';
-                if (/viewport-fit\s*=\s*cover/i.test(content)) {
+                const meta = document.querySelector('meta[name="viewport"]');
+                if (meta) {
+                    const content = meta.getAttribute('content') || '';
+                    if (!/viewport-fit\s*=\s*cover/i.test(content)) {
+                        meta.setAttribute('content', content ? content + ', viewport-fit=cover' : 'viewport-fit=cover');
+                    }
                     return;
                 }
-                meta.setAttribute('content', content ? content + ', viewport-fit=cover' : 'viewport-fit=cover');
+                const created = document.createElement('meta');
+                created.setAttribute('name', 'viewport');
+                created.setAttribute('content', 'width=device-width, initial-scale=1, viewport-fit=cover');
+                (document.head || document.documentElement).appendChild(created);
             } catch (e) {
                 throttleLog('viewport-error', 5000, () => console.warn('[SMGTV] 设置 viewport-fit 失败:', e));
             }
         };
-        if (document.head || document.documentElement) {
-            apply();
-        } else {
+        if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', apply, { once: true });
+        } else {
+            apply();
         }
     }
     function getVueInstance(el) {
@@ -269,6 +421,7 @@
     }
     function syncLoadingState(component) {
         forceOpenProgramList(component);
+        maybeAutoCaptureShift(component, false);
         recoverPlayerIfNeeded(component);
         const video = getPlayerVideo(component);
         if (video) {
@@ -298,8 +451,6 @@
         VIDEO_RESET_EVENTS.forEach(eventName => {
             video.addEventListener(eventName, resetReady, { passive: true });
         });
-        // iOS 原生视频全屏（webkitEnterFullscreen）的进出事件：用户用系统手势/按钮
-        // 退出全屏时也要把播放器全屏按钮状态同步回来
         video.addEventListener('webkitbeginfullscreen', () => syncFullscreenButtonState(component, true), { passive: true });
         video.addEventListener('webkitendfullscreen', () => syncFullscreenButtonState(component, false), { passive: true });
         markReady();
@@ -327,11 +478,11 @@
         component.__smgLoadingMonitor = setInterval(() => {
             const rootEl = component.$el;
             if (rootEl && !rootEl.isConnected) {
-                // 组件已销毁：清理定时器与观察器，避免长期持有组件引用
                 cleanupComponent(component);
                 initComponentPatch();
                 return;
             }
+            maybeAutoCaptureShift(component, true);
             syncLoadingState(component);
         }, 500);
         if (component.$refs?.livePlayer && !component.__smgLoadingObserver) {
@@ -394,9 +545,6 @@
             document.querySelector('.live-player .xgplayer, .player-box .xgplayer, .xgplayer, .live-player, .player-box');
     }
     function syncFullscreenButtonState(component, isFullscreen) {
-        // 不能写 player.fullscreen：那是 xgplayer 内部状态，它靠它在 fullscreenchange
-        // 里决定退出全屏时是否恢复样式。抢写会让 xgplayer 跳过样式恢复，把
-        // xgplayer-is-fullscreen 残留下来，表现为退出全屏后播放器变成网页全屏盖住整页。
         document.querySelectorAll(FULLSCREEN_BUTTON_SELECTOR).forEach(button => {
             button.setAttribute('data-state', isFullscreen ? 'full' : 'normal');
         });
@@ -411,7 +559,6 @@
                 player.getCssFullscreen(target);
                 cssFullscreenFallbackPlayer = player;
                 syncFullscreenButtonState(component, true);
-                console.log('[SMGTV] 已启用 xgplayer CSS 全屏兜底');
                 return;
             } catch (e) {
                 console.warn('[SMGTV] xgplayer CSS 全屏失败，使用样式兜底', e);
@@ -422,7 +569,6 @@
         target.classList.add(FULLSCREEN_TARGET_CLASS);
         document.body?.classList.add(FULLSCREEN_FALLBACK_CLASS);
         syncFullscreenButtonState(component, true);
-        console.log('[SMGTV] 已启用 CSS 全屏兜底');
     }
     function exitFallbackFullscreen(component) {
         const player = component?.player || cssFullscreenFallbackPlayer;
@@ -455,8 +601,6 @@
         }
     }
     function enterNativeVideoFullscreen(component) {
-        // iPhone Safari 不支持任意元素的 Fullscreen API，只有 <video> 可以
-        // 通过 webkitEnterFullscreen() 进入 iOS 原生全屏（带系统播放器控件）
         const video = getPlayerVideo(component);
         if (!video || typeof video.webkitEnterFullscreen !== 'function') {
             return false;
@@ -464,7 +608,6 @@
         try {
             video.webkitEnterFullscreen();
             syncFullscreenButtonState(component, true);
-            console.log('[SMGTV] 已启用 iOS 原生视频全屏');
             return true;
         } catch (e) {
             console.warn('[SMGTV] iOS 原生视频全屏失败，使用 CSS 兜底', e);
@@ -481,7 +624,6 @@
         Promise.resolve(enterNative)
             .then(() => syncFullscreenButtonState(component, true))
             .catch(() => {
-                // 元素全屏不可用（iPhone Safari）：先尝试 <video> 原生全屏，再退回 CSS 模拟全屏
                 if (!enterNativeVideoFullscreen(component)) {
                     enterFallbackFullscreen(target, component);
                 }
@@ -528,7 +670,6 @@
         if (getBrowserFullscreenElement() || isFallbackFullscreen()) {
             exitFullscreen(component);
         } else if (video && video.webkitDisplayingFullscreen) {
-            // iPhone 原生视频全屏中：退出 <video> 原生全屏
             try {
                 if (typeof video.webkitExitFullscreen === 'function') {
                     video.webkitExitFullscreen();
@@ -609,22 +750,17 @@
         }
         component.showOpenApp = false;
         component.showFlag = false;
-        component.startCountdown = function() {
-            console.log('[SMGTV] 已拦截试看倒计时');
-        };
+        component.startCountdown = function() {};
         if (component.liveTimer) {
             clearTimeout(component.liveTimer);
             component.liveTimer = null;
         }
         if (!component.player && component.programObj?.id && typeof component.playProgram === 'function') {
-            console.log('[SMGTV] 播放器已销毁，尝试重新加载节目');
             component.playProgram();
         }
         if (typeof component.pageVisibilityChange === 'function') {
             document.removeEventListener('visibilitychange', component.pageVisibilityChange);
-            component.pageVisibilityChange = function() {
-                console.log('[SMGTV] 已拦截切换标签页自动暂停');
-            };
+            component.pageVisibilityChange = function() {};
             document.addEventListener('visibilitychange', component.pageVisibilityChange);
         }
         if (component._handlerUnload) {
@@ -636,9 +772,6 @@
         });
         installReplayUrlPatch(component);
         ensurePlayableStream(component);
-        // 首次打开时若 API 改写未赶上首批 /programs 请求，节目列表仍是灰色不可点
-        // （dateout: isOutDate===1 || play!==1 && can_review===0）。这里在组件层解锁：
-        // 包一层 handleProgramList，让每次生成的列表都直接打开；并兜底扫一遍现有列表。
         const handleProgramList = component.handleProgramList;
         if (typeof handleProgramList === 'function' && !handleProgramList.__smgWrapped) {
             const wrappedList = function(...args) {
@@ -653,16 +786,12 @@
         }
         forceOpenProgramList(component);
         syncLoadingState(component);
-        // 补丁生效前页面已自动播放的回看节目：播放器是用原始 initPlayer 建的，
-        // config.url 没有 start/end。这里走一遍补丁后的 initPlayer，让回放参数生效。
         if (component.player && !component.player.config?.isPad && component.programObj?.play === 0) {
             const playerUrl = component.player?.config?.url || '';
             if (!/\bstart=\d/.test(playerUrl)) {
-                console.log('[SMGTV] 首次补丁：重新加载当前回放节目');
                 component.initPlayer({ changeCurrentList: false, isPlay: true, trigger: 'auto' });
             }
         }
-        console.log('[SMGTV] 页面限制补丁已生效');
     }
     let scanning = false;
     function initComponentPatch() {
@@ -765,7 +894,6 @@
     .${FULLSCREEN_TARGET_CLASS} .xg-top-bar {
         z-index: 2147483647 !important;
     }
-    /* iPhone 刘海 / Home 指示条安全区：仅在 CSS 兜底全屏下给控件留边距 */
     .${FULLSCREEN_TARGET_CLASS} .xgplayer-controls {
         padding-bottom: env(safe-area-inset-bottom, 0px) !important;
     }
@@ -773,10 +901,7 @@
         padding-top: env(safe-area-inset-top, 0px) !important;
     }
     `);
-    
-    // 保存原始的XMLHttpRequest.open方法
     const originalOpen = XMLHttpRequest.prototype.open;
-    // 重写XMLHttpRequest.open方法
     function isTargetTVApi(url) {
         try {
             return new URL(String(url), location.href).pathname.includes('/content/pc/tv/');
@@ -819,7 +944,6 @@
                 writable: false,
                 configurable: true
             });
-            // responseType='json' 时页面读 xhr.response 期望的是对象，不能覆写成字符串
             Object.defineProperty(xhr, 'response', {
                 value: xhr.responseType === 'json' ? JSON.parse(body) : body,
                 writable: false,
@@ -831,9 +955,7 @@
     }
     XMLHttpRequest.prototype.open = function(method, url) {
         this.__smgRequestUrl = String(url);
-        // 检查是否是目标API请求
         if (isTargetTVApi(this.__smgRequestUrl)) {
-            // 同一实例只挂一次监听，避免重复挂载导致监听器累计
             if (!this.__smgHooked) {
                 this.__smgHooked = true;
                 this.addEventListener('readystatechange', function() {
@@ -858,7 +980,6 @@
                         }
                         if (rewriteTvApiResponse(requestUrl, response)) {
                             replaceXhrResponse(this, JSON.stringify(response));
-                            console.log('[SMGTV] 已重写接口响应:', requestUrl);
                         }
                     } catch (e) {
                         throttleLog('parse-error', 5000, () => console.error('[SMGTV] 解析接口响应失败:', e));
@@ -866,8 +987,6 @@
                 });
             }
         }
-
-        // 调用原始的open方法
         return originalOpen.apply(this, arguments);
     };
     const originalFetch = window.fetch;
@@ -889,7 +1008,6 @@
                             if (!rewriteTvApiResponse(requestUrl, response)) {
                                 return res;
                             }
-                            console.log('[SMGTV] 已重写接口响应:', requestUrl);
                             return new Response(JSON.stringify(response), {
                                 status: res.status,
                                 statusText: res.statusText,
@@ -901,15 +1019,12 @@
                         }
                     }).catch(() => res);
                 } catch (e) {
-                    // clone()/text() 失败（body 已消费、流式响应等）：退回原响应，绝不能 reject 打断页面
                     throttleLog('rewrite-error', 5000, () => console.error('[SMGTV] 重写接口响应失败:', e));
                     return res;
                 }
             });
         };
     }
-    // 立即开始扫描组件：不等 window.load，否则页面首个自动播放的节目会在补丁生效前
-    // 用原始 initPlayer 初始化（回看节目拿不到 start/end 回放参数）。扫描循环会等到组件挂载。
     ensureViewportFitCover();
     initComponentPatch();
     initFullscreenPatch();
