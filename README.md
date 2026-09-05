@@ -1,54 +1,51 @@
-# 收看SMG电视频道直播<br>
-可自由观看SMG电视频道直播
+# SMG 网页直播观看增强
+
+在浏览器端为 SMG 视频直播页面提供更顺畅的观看体验，并对部分浏览器环境做兼容性优化。
 
 # 安装
-需要浏览器装有 [Tampermonkey](https://tampermonkey.net/) 或 [Violentmonkey](https://violentmonkey.github.io/) 插件, 点击下方表格中安装，即可安装脚本.
 
-|正式版 (GitHub 源)                                                                           |
+1. 浏览器安装 [Tampermonkey](https://tampermonkey.net/) 扩展（**推荐**）
+2. 点击下方链接安装脚本
+
+| 正式版 (GitHub 源)                                                                           |
 |---------------------------------------------------------------------------------------------|
 | [安装](https://raw.githubusercontent.com/Popukok/smg_live/refs/heads/main/smg_fivestar.user.js)  |
 
-安完脚本后[点击打开看看新闻](https://live.kankanews.com/huikan?id=10)，点击对应的频道即可观看节目<br>
-<br>
-**例如收看体育频道的比赛直播，可以跳过以下图片提示**
-
-![这是图片](https://p.statickksmg.com/cont/2023/10/08/image_1696731269_qOxBpp34.jpg "")
+3. 打开 [SMG 直播页面](https://live.kankanews.com/huikan?id=10)，选择频道即可观看
 
 # 兼容性
-### [Tampermonkey](https://tampermonkey.net/) / [Violentmonkey](https://violentmonkey.github.io/)
-兼容, 但在较旧的浏览器中 Violentmonkey 可能无法运行此脚本.
-支持**最新版** Chrome, Firefox, Safari.
+
+支持**最新版** Chrome、Firefox、Safari，脚本管理器推荐使用 [Tampermonkey](https://tampermonkey.net/)。
+
+> ⚠️ 由于两款插件存在技术差异，基于 Tampermonkey（油猴）开发的脚本，在 Violentmonkey（暴力猴）上可能存在兼容性问题，**建议使用油猴插件**。
 
 ### Safari（macOS / iOS）
-从 v0.16 起已针对 Safari 做兼容适配：
-- **macOS Safari**：使用 [Tampermonkey](https://tampermonkey.net/) 或免费的 [Userscripts App](https://apps.apple.com/app/userscripts/id1463198887) 加载脚本
-- **iOS / iPadOS Safari**（需 iOS 15+）：安装 [Userscripts App](https://apps.apple.com/app/userscripts/id1463198887) 或 Tampermonkey，在「设置 → Safari → 扩展」中启用，并允许访问 `kankanews.com`，然后导入脚本即可
-- iPhone 上全屏会自动使用 iOS 原生视频全屏；CSS 兜底全屏已适配动态视口（dvh/dvw）与安全区域（刘海 / Home 指示条）
 
-> ⚠️ 安装后建议在管理器中**关闭此脚本的自动更新**，否则会从 GitHub 拉取上游原版覆盖本地改动。
+- **macOS Safari**：使用 [Tampermonkey](https://tampermonkey.net/) 或免费的 [Userscripts App](https://apps.apple.com/app/userscripts/id1463198887) 加载脚本
+- **iOS / iPadOS Safari**（需 iOS 15+）：安装 [Userscripts App](https://apps.apple.com/app/userscripts/id1463198887) 或 Tampermonkey，在「设置 → Safari → 扩展」中启用并允许访问 `kankanews.com`，导入脚本即可
+- iPhone 全屏使用 iOS 原生视频全屏；CSS 全屏已适配动态视口（dvh/dvw）与安全区域（刘海 / Home 指示条）
+
+> ⚠️ 若自行修改过脚本，建议在管理器中**关闭自动更新**，避免被上游版本覆盖本地改动。
 
 # 移动端
-支持在移动端收看，前提是移动端浏览器支持 **[Tampermonkey](https://tampermonkey.net/)** 插件，<br>并且支持运行 **[Tampermonkey](https://tampermonkey.net/)** 脚本
 
-💎  **如何选择**
+在支持用户脚本的移动浏览器中均可使用（Android 端此类浏览器通常内置 Violentmonkey，请一并留意上方兼容性提示）：
 
-*   如果你希望**安装过程最接近电脑上的Chrome体验**，能直接从Chrome网上应用店安装各种扩展，**Kiwi Browser** ，**Chrome Browser** , **Edge Browser** 是很不错的选择。
-*   如果你看重**国产浏览器且对Chrome和Edge扩展生态的兼容性**，**狐猴浏览器**值得考虑。
-*   如果你**习惯使用Firefox桌面版**，或者看重**开源生态**，那么**Firefox for Android** 会很适合你。
-*   **X浏览器**则以其**轻量级、无广告**的特点，并支持油猴脚本，吸引了部分用户。
-*   如果你使用的是 **iPhone / iPad**，可直接用 **Safari + Userscripts App** 或 **Tampermonkey**，无需更换浏览器。
+- **Kiwi Browser**、**Chrome**、**Edge**：安装体验与桌面端最接近
+- **Firefox for Android**：支持扩展与脚本
+- **X浏览器**：轻量、支持用户脚本
+- **iPhone / iPad**：直接使用 Safari + Userscripts App 或 Tampermonkey，无需更换浏览器
 
-# 脚本仅供学习交流
+# 苹果设备使用说明
 
-💎在苹果设备上怎么用
+**macOS Safari**（二选一）：
+- Userscripts（免费开源，推荐）：App Store 安装 → Safari 设置 → 扩展中启用 → 打开 Userscripts App 设定脚本目录 → 将 `smg_fivestar.user.js` 放入该目录
+- Tampermonkey：App Store 安装 → Safari 设置 → 扩展中启用并允许访问网站 → 导入脚本
 
-macOS Safari（两种任选）：
-Userscripts（免费开源，推荐）：App Store 搜 "Userscripts" 安装 → Safari 设置 → 扩展里启用它 → 打开 Userscripts App 设定脚本目录 → 把 smg_fivestar.user.js 拷进该目录即可。
-Tampermonkey：App Store 安装 Tampermonkey → Safari 设置 → 扩展启用并允许访问网站 → 双击/拖入 .user.js 或访问脚本链接，点"安装"。
+**iPhone / iPad（需 iOS 15+）**：
+1. App Store 安装 Userscripts（免费）或 Tampermonkey
+2. 设置 → Safari → 扩展 → 启用并允许访问 `kankanews.com`
+3. 将 `smg_fivestar.user.js` 放入 Userscripts 的脚本目录（或经分享菜单导入）
+4. 打开 [SMG 直播页面](https://live.kankanews.com/huikan?id=10) 选择频道即可
 
-iPhone / iPad（需 iOS 15+）：
-App Store 装 Userscripts（免费）或 Tampermonkey；
-设置 → Safari → 扩展 → 启用该扩展，并允许它访问 kankanews.com；
-用"文件" App 把 smg_fivestar.user.js 放到 Userscripts 的脚本目录（App 内有图示说明），或在 Safari 里打开脚本链接通过分享菜单导入；
-访问 https://live.kankanews.com/huikan?id=10 ，点频道即可
-
+本仓库内容仅供学习交流。
