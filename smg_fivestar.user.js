@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name             收看SMGTV电视节目
 // @namespace        http://tampermonkey.net/
-// @version          0.17
+// @version          0.18
 // @description      收看SMGTV，并解除页面部分限制
 // @author           https://github.com/Popukok
 // @match            *://*.kankanews.com/huikan*
@@ -25,6 +25,14 @@
     const channelShiftBaseCache = Object.create(null);
     const channelLiveBaseCache = Object.create(null);
     const LS_KEY_PREFIX = 'smgtv_shift_base_';
+    const SMG_API_SECRET = '28c8edde3d61a0411511d3b1866f0636';
+    const SMG_API_VERSION = '2.42.23';
+    const SMG_PUBKEY = '-----BEGIN PUBLIC KEY-----\n' +
+        'MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDP5hzPUW5RFeE2xBT1ERB3hHZI\n' +
+        'Votn/qatWhgc1eZof09qKjElFN6Nma461ZAwGpX4aezKP8Adh4WJj4u2O54xCXDt\n' +
+        'wzKRqZO2oNZkuNmF2Va8kLgiEQAAcxYc8JgTN+uQQNpsep4n/o1sArTJooZIF17E\n' +
+        'tSqSgXDcJ7yDj5rc7wIDAQAB\n' +
+        '-----END PUBLIC KEY-----';
     function parseJwtExp(url) {
         try {
             const token = new URL(url).searchParams.get('token');
@@ -38,6 +46,164 @@
         } catch (e) {
             return null;
         }
+    }
+    function smgMd5(str) {
+        function rl(n, c) { return (n << c) | (n >>> (32 - c)); }
+        function add(x, y) {
+            var l = (x & 0xffff) + (y & 0xffff);
+            var m = (x >> 16) + (y >> 16) + (l >> 16);
+            return (m << 16) | (l & 0xffff);
+        }
+        function cmn(q, a, b, x, s, t) {
+            a = add(add(a, q), add(x, t));
+            return add(rl(a, s), b);
+        }
+        function ff(a, b, c, d, x, s, t) { return cmn((b & c) | ((~b) & d), a, b, x, s, t); }
+        function gg(a, b, c, d, x, s, t) { return cmn((b & d) | (c & (~d)), a, b, x, s, t); }
+        function hh(a, b, c, d, x, s, t) { return cmn(b ^ c ^ d, a, b, x, s, t); }
+        function ii(a, b, c, d, x, s, t) { return cmn(c ^ (b | (~d)), a, b, x, s, t); }
+        function binl(s) {
+            var b = [];
+            var m = (1 << 8) - 1;
+            for (var i = 0; i < s.length * 8; i += 8) b[i >> 5] |= (s.charCodeAt(i / 8) & m) << (i % 32);
+            return b;
+        }
+        function binl2hex(b) {
+            var h = "0123456789abcdef";
+            var s = "";
+            for (var i = 0; i < b.length * 4; i++) {
+                s += h.charAt((b[i >> 2] >> ((i % 4) * 8 + 4)) & 0xf) + h.charAt((b[i >> 2] >> ((i % 4) * 8)) & 0xf);
+            }
+            return s;
+        }
+        str = unescape(encodeURIComponent(str));
+        var x = binl(str);
+        x[str.length >> 2] |= 0x80 << ((str.length % 4) << 3);
+        x[(((str.length + 8) >> 6) << 4) + 14] = str.length * 8;
+        var a = 1732584193, b = -271733879, c = -1732584194, d = 271733878;
+        for (var i = 0; i < x.length; i += 16) {
+            var oa = a, ob = b, oc = c, od = d;
+            a = ff(a, b, c, d, x[i], 7, -680876936); d = ff(d, a, b, c, x[i + 1], 12, -389564586);
+            c = ff(c, d, a, b, x[i + 2], 17, 606105819); b = ff(b, c, d, a, x[i + 3], 22, -1044525330);
+            a = ff(a, b, c, d, x[i + 4], 7, -176418897); d = ff(d, a, b, c, x[i + 5], 12, 1200080426);
+            c = ff(c, d, a, b, x[i + 6], 17, -1473231341); b = ff(b, c, d, a, x[i + 7], 22, -45705983);
+            a = ff(a, b, c, d, x[i + 8], 7, 1770035416); d = ff(d, a, b, c, x[i + 9], 12, -1958414417);
+            c = ff(c, d, a, b, x[i + 10], 17, -42063); b = ff(b, c, d, a, x[i + 11], 22, -1990404162);
+            a = ff(a, b, c, d, x[i + 12], 7, 1804603682); d = ff(d, a, b, c, x[i + 13], 12, -40341101);
+            c = ff(c, d, a, b, x[i + 14], 17, -1502002290); b = ff(b, c, d, a, x[i + 15], 22, 1236535329);
+            a = gg(a, b, c, d, x[i + 1], 5, -165796510); d = gg(d, a, b, c, x[i + 6], 9, -1069501632);
+            c = gg(c, d, a, b, x[i + 11], 14, 643717713); b = gg(b, c, d, a, x[i], 20, -373897302);
+            a = gg(a, b, c, d, x[i + 5], 5, -701558691); d = gg(d, a, b, c, x[i + 10], 9, 38016083);
+            c = gg(c, d, a, b, x[i + 15], 14, -660478335); b = gg(b, c, d, a, x[i + 4], 20, -405537848);
+            a = gg(a, b, c, d, x[i + 9], 5, 568446438); d = gg(d, a, b, c, x[i + 14], 9, -1019803690);
+            c = gg(c, d, a, b, x[i + 3], 14, -187363961); b = gg(b, c, d, a, x[i + 8], 20, 1163531501);
+            a = gg(a, b, c, d, x[i + 13], 5, -1444681467); d = gg(d, a, b, c, x[i + 2], 9, -51403784);
+            c = gg(c, d, a, b, x[i + 7], 14, 1735328473); b = gg(b, c, d, a, x[i + 12], 20, -1926607734);
+            a = hh(a, b, c, d, x[i + 5], 4, -378558); d = hh(d, a, b, c, x[i + 8], 11, -2022574463);
+            c = hh(c, d, a, b, x[i + 11], 16, 1839030562); b = hh(b, c, d, a, x[i + 14], 23, -35309556);
+            a = hh(a, b, c, d, x[i + 1], 4, -1530992060); d = hh(d, a, b, c, x[i + 4], 11, 1272893353);
+            c = hh(c, d, a, b, x[i + 7], 16, -155497632); b = hh(b, c, d, a, x[i + 10], 23, -1094730640);
+            a = hh(a, b, c, d, x[i + 13], 4, 681279174); d = hh(d, a, b, c, x[i], 11, -358537222);
+            c = hh(c, d, a, b, x[i + 3], 16, -722521979); b = hh(b, c, d, a, x[i + 6], 23, 76029189);
+            a = hh(a, b, c, d, x[i + 9], 4, -640364487); d = hh(d, a, b, c, x[i + 12], 11, -421815835);
+            c = hh(c, d, a, b, x[i + 15], 16, 530742520); b = hh(b, c, d, a, x[i + 2], 23, -995338651);
+            a = ii(a, b, c, d, x[i], 6, -198630844); d = ii(d, a, b, c, x[i + 7], 10, 1126891415);
+            c = ii(c, d, a, b, x[i + 14], 15, -1416354905); b = ii(b, c, d, a, x[i + 5], 21, -57434055);
+            a = ii(a, b, c, d, x[i + 12], 6, 1700485571); d = ii(d, a, b, c, x[i + 3], 10, -1894986606);
+            c = ii(c, d, a, b, x[i + 10], 15, -1051523); b = ii(b, c, d, a, x[i + 1], 21, -2054922799);
+            a = ii(a, b, c, d, x[i + 8], 6, 1873313359); d = ii(d, a, b, c, x[i + 15], 10, -30611744);
+            c = ii(c, d, a, b, x[i + 6], 15, -1560198380); b = ii(b, c, d, a, x[i + 13], 21, 1309151649);
+            a = ii(a, b, c, d, x[i + 4], 6, -145523070); d = ii(d, a, b, c, x[i + 11], 10, -1120210379);
+            c = ii(c, d, a, b, x[i + 2], 15, 718787259); b = ii(b, c, d, a, x[i + 9], 21, -343485551);
+            a = add(a, oa); b = add(b, ob); c = add(c, oc); d = add(d, od);
+        }
+        return binl2hex([a, b, c, d]);
+    }
+    function smgSignParams(params) {
+        const n = {
+            platform: 'pc',
+            version: SMG_API_VERSION,
+            nonce: Math.random().toString(36).slice(-8),
+            timestamp: Math.floor(Date.now() / 1000),
+            'Api-Version': 'v1'
+        };
+        const merged = {};
+        Object.keys(params).forEach(k => { merged[k] = params[k]; });
+        Object.keys(n).forEach(k => { merged[k] = n[k]; });
+        let s = '';
+        Object.keys(merged).sort().forEach(k => {
+            if (merged[k] != null) s += k + '=' + merged[k] + '&';
+        });
+        merged.sign = smgMd5(smgMd5(s + SMG_API_SECRET));
+        return merged;
+    }
+    function smgApiGet(path, params) {
+        const signed = smgSignParams(params || {});
+        const q = Object.keys(params || {}).map(k =>
+            encodeURIComponent(k) + '=' + encodeURIComponent(params[k])).join('&');
+        const headers = { Accept: 'application/json, text/plain, */*' };
+        Object.keys(signed).forEach(hk => { headers[hk] = signed[hk]; });
+        headers['M-Uuid'] = localStorage.getItem('uuid') || '';
+        return fetch('https://kapi.kankanews.com' + path + (q ? '?' + q : ''), { headers })
+            .then(r => r.json())
+            .catch(() => null);
+    }
+    function hexToBase64(hexStr) {
+        try {
+            const bytes = hexStr.replace(/\s+/g, '').match(/[\da-fA-F]{2}/g) || [];
+            if (!bytes.length) return '';
+            return btoa(bytes.map(b => String.fromCharCode(parseInt(b, 16))).join(''));
+        } catch (e) {
+            return '';
+        }
+    }
+    function decryptRsaChunks(encryptedBase64, onReady) {
+        let done = false;
+        const finish = result => {
+            if (done) return;
+            done = true;
+            onReady(result);
+        };
+        const tryDecrypt = () => {
+            if (typeof JSEncrypt === 'undefined') return false;
+            try {
+                const encrypt = new JSEncrypt();
+                encrypt.setPublicKey(SMG_PUBKEY);
+                let hexStr;
+                try {
+                    const binary = atob(encryptedBase64);
+                    hexStr = Array.from(binary, ch => ('0' + ch.charCodeAt(0).toString(16)).slice(-2)).join('').toUpperCase();
+                } catch (e) {
+                    finish('');
+                    return true;
+                }
+                let out = '';
+                for (let i = 0; i < hexStr.length;) {
+                    const chunk = hexStr.slice(i, i + 256);
+                    i += 256;
+                    const b64 = hexToBase64(chunk);
+                    if (!b64) continue;
+                    const decrypted = encrypt.decrypt(b64);
+                    if (decrypted) out += decrypted;
+                }
+                if (out) {
+                    finish(out);
+                    return true;
+                }
+            } catch (e) {}
+            return false;
+        };
+        if (tryDecrypt()) return;
+        let tries = 0;
+        const timer = setInterval(() => {
+            tries += 1;
+            if (tryDecrypt()) {
+                clearInterval(timer);
+            } else if (tries > 50) {
+                clearInterval(timer);
+                finish('');
+            }
+        }, 200);
     }
     function loadPersistedShiftBase(channelId) {
         try {
@@ -197,27 +363,9 @@
                         }
                         if (fromShift) {
                             savePersistedShiftBase(channelId, base);
-                        }
-                        if (fromShift && component.__smgAutoFlashTarget && !component.__smgAutoFlashScheduled) {
-                            component.__smgAutoFlashScheduled = true;
-                            const flashAnchorId = component.__smgAutoFlashAnchorId;
-                            const flashTarget = component.__smgAutoFlashTarget;
-                            component.__smgAutoFlashTarget = null;
-                            component.__smgAutoFlashAnchorId = null;
-                            setTimeout(() => {
-                                try {
-                                    const stillOnAnchor = component && component.programObj?.id === flashAnchorId;
-                                    if (stillOnAnchor && typeof component.changeProgram === 'function' && flashTarget) {
-                                        component.changeProgram(flashTarget);
-                                    }
-                                } catch (e) {
-                                    console.warn('[SMGTV] 自动捕获切回失败:', e);
-                                } finally {
-                                    if (component) {
-                                        component.__smgAutoFlashScheduled = false;
-                                    }
-                                }
-                            }, 400);
+                            console.log('[SMGTV] 已抓取回看源');
+                        } else {
+                            console.log('[SMGTV] 已抓取直播源');
                         }
                     }
                 }
@@ -251,12 +399,14 @@
                 } else if (isReplay && !hasStream && program?.start_time && program?.end_time) {
                     if (baseOk) {
                         config.url = baseOk + '&start=' + program.start_time + '&end=' + program.end_time;
+                        console.log('[SMGTV] 已注入回放 频道' + channelId);
                     } else {
                         component.__smgNeedShiftBase = true;
                     }
                 } else if (!isReplay && !hasStream) {
                     if (baseOk) {
                         config.url = baseOk;
+                        console.log('[SMGTV] 已注入直播 频道' + channelId);
                     } else {
                         component.__smgNeedShiftBase = true;
                     }
@@ -265,43 +415,91 @@
             }
         });
     }
-    function findSportsNewsAnchor(component) {
-        const lists = [component?.currentProgramList, component?.playingProgramList, component?.slitProgramList];
+    function dateStrOffset(daysAgo) {
+        const d = new Date(Date.now() - daysAgo * 86400000);
+        return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+    function findTodayDonorId(component) {
+        const lists = [component?.currentProgramList, component?.playingProgramList];
         const isEnded = p => p && p.id && p.isOutDate === 0 && p.play === 0;
         for (const list of lists) {
             if (!Array.isArray(list)) continue;
             for (const p of list) {
-                if (isEnded(p) && typeof p.name === 'string' && p.name.indexOf('体育新闻') !== -1) {
-                    return p;
-                }
+                if (isEnded(p) && typeof p.name === 'string' && p.name.indexOf('体育新闻') !== -1) return p.id;
             }
         }
         for (const list of lists) {
             if (!Array.isArray(list)) continue;
             for (const p of list) {
-                if (isEnded(p) && p.is_review === 1) {
-                    return p;
-                }
+                if (isEnded(p) && p.is_review === 1) return p.id;
             }
         }
         return null;
     }
-    function getRestoreProgram(component, anchor) {
-        const cur = component?.programObj;
-        if (cur && cur.id && (!anchor || cur.id !== anchor.id)) {
-            return cur;
+    function findDonorIdFromList(list) {
+        if (!Array.isArray(list)) return null;
+        const news = list.find(p => p && p.is_review === 1 && p.id &&
+            typeof p.name === 'string' && p.name.indexOf('体育新闻') !== -1);
+        if (news) return news.id;
+        const any = list.find(p => p && p.is_review === 1 && p.id);
+        return any ? any.id : null;
+    }
+    function fetchShiftByDonor(channelId, donorId) {
+        return smgApiGet('/content/pc/tv/program/detail', { channel_program_id: donorId })
+            .then(res => {
+                const detail = res && res.result;
+                const enc = detail && detail.channel_info && detail.channel_info.shift_address;
+                if (!enc) return null;
+                return new Promise(resolve => {
+                    decryptRsaChunks(enc, url => {
+                        if (!url) return resolve(null);
+                        try {
+                            const u = new URL(url);
+                            u.searchParams.delete('start');
+                            u.searchParams.delete('end');
+                            const base = u.toString();
+                            const exp = parseJwtExp(url);
+                            channelShiftBaseCache[channelId] = { url: base, exp: exp || (Date.now() + 12 * 3600 * 1000) };
+                            savePersistedShiftBase(channelId, base);
+                            console.log('[SMGTV] 已获取回看源');
+                            resolve(base);
+                        } catch (e) {
+                            resolve(null);
+                        }
+                    });
+                });
+            });
+    }
+    function acquireShiftBase(channelId, component) {
+        let candidate;
+        if (component) {
+            const todayId = findTodayDonorId(component);
+            if (todayId) candidate = todayId;
         }
-        const lists = [component?.currentProgramList, component?.playingProgramList];
-        for (const list of lists) {
-            if (!Array.isArray(list)) {
-                continue;
-            }
-            const live = list.find(p => p && p.play === 1 && p.id);
-            if (live) {
-                return live;
-            }
+        if (!candidate) {
+            const listPromise = smgApiGet('/content/pc/tv/programs', { channel_id: channelId, date: dateStrOffset(0) });
+            return listPromise.then(res => {
+                const id = findDonorIdFromList(res && res.result && res.result.programs);
+                if (id) return fetchShiftByDonor(channelId, id).then(url => url || scanPast(channelId, 1));
+                return scanPast(channelId, 1);
+            });
         }
-        return null;
+        return fetchShiftByDonor(channelId, candidate).then(url => url || scanPast(channelId, 1));
+    }
+    function scanPast(channelId, daysAgo) {
+        if (daysAgo > 7) {
+            console.warn('[SMGTV] 7天内未找到可用的回看源');
+            return Promise.resolve(null);
+        }
+        return smgApiGet('/content/pc/tv/programs', { channel_id: channelId, date: dateStrOffset(daysAgo) })
+            .then(res => {
+                const id = findDonorIdFromList(res && res.result && res.result.programs);
+                if (!id) return scanPast(channelId, daysAgo + 1);
+                return fetchShiftByDonor(channelId, id).then(url => {
+                    if (url) return url;
+                    return scanPast(channelId, daysAgo + 1);
+                });
+            });
     }
     function maybeAutoCaptureShift(component, fromMonitor) {
         if (!component || !component.__smgPatched || !component.__smgNeedShiftBase || !fromMonitor) {
@@ -328,38 +526,34 @@
             component.__smgNeedShiftBase = false;
             return;
         }
-        const anchor = findSportsNewsAnchor(component);
-        if (!anchor) {
-            component.__smgNeedShiftBase = false;
+        // 冷却：一次获取尝试后 60s 内不重复，避免心跳空转
+        const cooldownKey = '__smgShiftCooldown';
+        if (now - (component[cooldownKey] || 0) < 60000) {
             return;
         }
-        const restore = getRestoreProgram(component, anchor);
-        if (!restore || typeof component.changeProgram !== 'function') {
+        component[cooldownKey] = now;
+        if (component.__smgAcquiring) {
             return;
         }
-        component.__smgNeedShiftBase = false;
-        component.__smgAutoFlashAnchorId = anchor.id;
-        component.__smgAutoFlashTarget = restore;
-        try {
-            component.changeProgram(anchor);
-        } catch (e) {
-            console.warn('[SMGTV] 兜底捕获触发失败:', e);
-            component.__smgAutoFlashTarget = null;
-        }
-        setTimeout(() => {
-            const canRestore = component && component.__smgAutoFlashTarget &&
-                !component.__smgAutoFlashScheduled &&
-                component.programObj?.id === component.__smgAutoFlashAnchorId;
-            if (canRestore && typeof component.changeProgram === 'function') {
-                component.__smgAutoFlashTarget = null;
-                component.__smgAutoFlashAnchorId = null;
-                try {
-                    component.changeProgram(restore);
-                } catch (e) {
-                    console.warn('[SMGTV] 兜底捕获切回失败:', e);
+        component.__smgAcquiring = true;
+        acquireShiftBase(chId, component).then(ok => {
+            component.__smgAcquiring = false;
+            if (ok) {
+                component.__smgNeedShiftBase = false;
+                component.__smgAcquireFails = 0;
+                // shift 基底已就绪：重载当前节目，让 Proxy 注入生效(之前空 url 播放器已失败)
+                if (component && typeof component.initPlayer === 'function') {
+                    component.initPlayer({ changeCurrentList: false, isPlay: true, trigger: 'click' });
+                }
+            } else {
+                // 连续失败：拉长冷却避免反复请求；needShift 保留，用户换台/重试会重置
+                component.__smgAcquireFails = (component.__smgAcquireFails || 0) + 1;
+                if (component.__smgAcquireFails >= 3) {
+                    component[cooldownKey] = now + 10 * 60 * 1000;
+                    console.warn('[SMGTV] 暂无可用播放源');
                 }
             }
-        }, 2500);
+        });
     }
     function recoverPlayerIfNeeded(component) {
         if (!component || typeof component.initPlayer !== 'function' || component.__smgRecovering) {
