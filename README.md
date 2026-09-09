@@ -6,7 +6,9 @@
 
 26.08.21 ---> 去掉了接口返回M3U8地址，可能出于业务需求，保留体育新闻回看。
 
-26.09.08 ---> 地址由火山（volc-stream）改为腾讯（tencent-vods），回看（timeshift）和直播（token）改为两套路径，封堵升级。
+26.09.08 ---> 地址由火山（volc-stream）改为腾讯（tencent-vods），回看（timeshift）和直播（token）改为两套路径，封堵升级测试（有概率）。
+
+26.09.09 ---> 已恢复火山源（volc-stream），后续是否彻底切换腾讯源（tencent-vods），未知，仅做记录。
 
 # 安装
 
